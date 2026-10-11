@@ -1,0 +1,6 @@
+{
+  "name": "Ders İçi Soru ve Canlı Quiz Sistemi",
+  "description": "Öğrencilerin AIKEN formatında soru yüklediği, Gemini ile analiz edilip seçilen soruların gerçek zamanlı quiz ile çözüldüğü ve Google Sheets ile entegre çalışan sınıf etkileşim platformu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,37 @@
+{
+  "entities": {
+    "session": {
+      "title": "Session",
+      "description": "Ders oturumu ve canlı quiz oturumu verileri",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "5 haneli benzersiz oturum kodu"
+        },
+        "courseName": {
+          "type": "string",
+          "description": "Ders adı"
+        },
+        "status": {
+          "type": "string",
+          "description": "Oturum durumu"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Oluşturulma zamanı"
+        }
+      },
+      "required": ["code", "courseName", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/sessions/{sessionId}": {
+      "schema": {
+        "$ref": "#/entities/session"
+      },
+      "description": "Oturumlar koleksiyonu"
+    }
+  }
+}
