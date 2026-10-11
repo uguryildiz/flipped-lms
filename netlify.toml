@@ -2,6 +2,10 @@
   command = "npm run build"
   publish = "dist"
 
+[build.environment]
+  # APP_URL is a public URL (also used in public/_redirects), not a secret.
+  SECRETS_SCAN_OMIT_KEYS = "APP_URL"
+
 # Single Page App (SPA) fallback routing
 # Note: For Netlify deployments, if you have a separate backend server (e.g. on Render, Railway, Fly.io),
 # you can configure VITE_API_URL in Netlify Environment Variables.

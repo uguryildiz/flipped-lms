@@ -269,7 +269,7 @@ async function startServer() {
 
   // Teacher Authentication (credentials from environment variables)
   const TEACHER_REG_NO = (process.env.TEACHER_REGISTRATION_NO || '2699').trim();
-  const TEACHER_PASSWORD = (process.env.TEACHER_PASSWORD || 'DigiNova1324').trim();
+  const TEACHER_PASSWORD = (process.env.TEACHER_PASSWORD || '').trim();
 
   app.post('/api/auth/teacher/login', (req, res) => {
     const { registrationNo, password } = req.body || {};
@@ -278,6 +278,7 @@ async function startServer() {
     }
 
     if (
+      TEACHER_PASSWORD &&
       registrationNo.toString().trim() === TEACHER_REG_NO &&
       password.toString().trim() === TEACHER_PASSWORD
     ) {
