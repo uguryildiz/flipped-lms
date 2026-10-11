@@ -1387,7 +1387,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setTimeout(() => setCopiedCode(false), 2000);
   };
 
-  // Teacher Authentication Gate: Require Registration No (2699) & Password (DigiNova1324)
+  // Teacher Authentication Gate: Require Registration No & Password (verified server-side)
   if (!teacherAuth) {
     return (
       <TeacherLogin
