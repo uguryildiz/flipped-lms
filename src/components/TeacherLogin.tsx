@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, UserCheck, ArrowRight, AlertCircle, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { apiFetch, safeJson } from '../utils/api';
 
 interface TeacherLoginProps {
   onSuccess: (teacherInfo: { registrationNo: string; title: string }) => void;
@@ -24,7 +25,7 @@ export const TeacherLogin: React.FC<TeacherLoginProps> = ({ onSuccess, onSwitchT
 
     setIsLoading(true);
     try {
-      const res = await fetch('/api/auth/teacher/login', {
+      const res = await apiFetch('/api/auth/teacher/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -33,12 +34,16 @@ export const TeacherLogin: React.FC<TeacherLoginProps> = ({ onSuccess, onSwitchT
         }),
       });
 
-      const data = await res.json();
+      const data = await safeJson<{ teacher?: { registrationNo: string; title: string }; error?: string }>(res);
       if (!res.ok) {
-        throw new Error(data.error || 'Giriş başarısız. Lütfen bilgilerinizi kontrol ediniz.');
+        throw new Error(data?.error || `Giriş başarısız (HTTP ${res.status}). Sunucu bağlantısını kontrol ediniz.`);
       }
 
-      onSuccess(data.teacher);
+      if (data?.teacher) {
+        onSuccess(data.teacher);
+      } else {
+        throw new Error('Geçersiz sunucu yanıtı alındı.');
+      }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Giriş yapılamadı.');
     } finally {

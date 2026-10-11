@@ -57,6 +57,7 @@ import {
   syncAnswersBatchToSheet,
   syncAnswerToSheet,
 } from '../services/sheets';
+import { apiFetch, safeJson } from '../utils/api';
 
 interface TeacherDashboardProps {
   activeSessionCode: string;
@@ -79,8 +80,30 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   });
 
-  // Session State
-  const [session, setSession] = useState<SessionInfo | null>(null);
+  // Session State (with resilient localStorage persistence)
+  const [session, setSessionState] = useState<SessionInfo | null>(() => {
+    try {
+      const stored = localStorage.getItem('edu_last_session');
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const setSession = (
+    val: SessionInfo | null | ((prev: SessionInfo | null) => SessionInfo | null)
+  ) => {
+    setSessionState((prev) => {
+      const next = typeof val === 'function' ? val(prev) : val;
+      try {
+        if (next) {
+          localStorage.setItem('edu_last_session', JSON.stringify(next));
+        }
+      } catch {}
+      return next;
+    });
+  };
+
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -219,20 +242,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       let codeToUse = code;
       if (!codeToUse) {
         // Check if there is an active session on server
-        const latestRes = await fetch('/api/sessions/latest');
-        if (latestRes.ok) {
-          const latestData: SessionInfo = await latestRes.json();
-          if (latestData?.code) {
-            codeToUse = latestData.code;
-            onSessionCodeChange(latestData.code);
+        try {
+          const latestRes = await apiFetch('/api/sessions/latest');
+          if (latestRes.ok) {
+            const latestData = await safeJson<SessionInfo>(latestRes);
+            if (latestData?.code) {
+              codeToUse = latestData.code;
+              onSessionCodeChange(latestData.code);
+            }
           }
-        }
+        } catch {}
       }
 
       // If still no session exists on server at all, automatically create an active session
       if (!codeToUse) {
         try {
-          const autoRes = await fetch('/api/sessions', {
+          const autoRes = await apiFetch('/api/sessions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -244,20 +269,22 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             }),
           });
           if (autoRes.ok) {
-            const autoData: SessionInfo = await autoRes.json();
-            codeToUse = autoData.code;
-            onSessionCodeChange(autoData.code);
-            setSession(autoData);
-            setEditableCourseName(autoData.courseName);
-            setEditableTopics(autoData.topics || []);
-            setEditableAttemptsLimit(autoData.maxAnswerAttemptsPerQuestion || 1);
-            setEditableQuestionsLimit(autoData.maxQuestionsPerStudent || 1);
-            setEditableTopicQuestionsLimit(autoData.maxQuestionsPerTopicPerStudent || 1);
-            setEditableMaxTopicsLimit(autoData.maxTopicsPerStudent || 0);
-            setEditableThreshold(autoData.scoreThreshold || 75);
-            setEditableTopCount(autoData.topCount || 2);
-            setEditableSelectionMode(autoData.selectionMode || 'threshold_and_top_count');
-            return;
+            const autoData = await safeJson<SessionInfo>(autoRes);
+            if (autoData) {
+              codeToUse = autoData.code;
+              onSessionCodeChange(autoData.code);
+              setSession(autoData);
+              setEditableCourseName(autoData.courseName);
+              setEditableTopics(autoData.topics || []);
+              setEditableAttemptsLimit(autoData.maxAnswerAttemptsPerQuestion || 1);
+              setEditableQuestionsLimit(autoData.maxQuestionsPerStudent || 1);
+              setEditableTopicQuestionsLimit(autoData.maxQuestionsPerTopicPerStudent || 1);
+              setEditableMaxTopicsLimit(autoData.maxTopicsPerStudent || 0);
+              setEditableThreshold(autoData.scoreThreshold || 75);
+              setEditableTopCount(autoData.topCount || 2);
+              setEditableSelectionMode(autoData.selectionMode || 'threshold_and_top_count');
+              return;
+            }
           }
         } catch (e) {
           console.warn('Could not auto-create session:', e);
@@ -265,27 +292,83 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       }
 
       if (!codeToUse) {
+        // Fallback: check localStorage for saved session
+        try {
+          const stored = localStorage.getItem('edu_last_session');
+          if (stored) {
+            const localData: SessionInfo = JSON.parse(stored);
+            if (localData && localData.code) {
+              codeToUse = localData.code;
+              onSessionCodeChange(localData.code);
+              setSession(localData);
+              setEditableCourseName(localData.courseName);
+              setEditableTopics(localData.topics || []);
+              setEditableAttemptsLimit(localData.maxAnswerAttemptsPerQuestion || 1);
+              setEditableQuestionsLimit(localData.maxQuestionsPerStudent || 1);
+              setEditableTopicQuestionsLimit(localData.maxQuestionsPerTopicPerStudent || 1);
+              setEditableMaxTopicsLimit(localData.maxTopicsPerStudent || 0);
+              setEditableThreshold(localData.scoreThreshold || 75);
+              setEditableTopCount(localData.topCount || 2);
+              setEditableSelectionMode(localData.selectionMode || 'threshold_and_top_count');
+              return;
+            }
+          }
+        } catch {}
         setSession(null);
         return;
       }
 
-      const res = await fetch(`/api/sessions/${codeToUse}`);
+      const res = await apiFetch(`/api/sessions/${codeToUse}`);
       if (res.ok) {
-        const data: SessionInfo = await res.json();
-        setSession(data);
-        setEditableCourseName(data.courseName);
-        setEditableTopics(data.topics || []);
-        setEditableAttemptsLimit(data.maxAnswerAttemptsPerQuestion || 1);
-        setEditableQuestionsLimit(data.maxQuestionsPerStudent || 1);
-        setEditableTopicQuestionsLimit(data.maxQuestionsPerTopicPerStudent || 1);
-        setEditableMaxTopicsLimit(data.maxTopicsPerStudent || 0);
-        setEditableThreshold(data.scoreThreshold || 75);
-        setEditableTopCount(data.topCount || 2);
-        setEditableSelectionMode(data.selectionMode || 'threshold_and_top_count');
-      } else {
-        setSession(null);
+        const data = await safeJson<SessionInfo>(res);
+        if (data) {
+          setSession(data);
+          setEditableCourseName(data.courseName);
+          setEditableTopics(data.topics || []);
+          setEditableAttemptsLimit(data.maxAnswerAttemptsPerQuestion || 1);
+          setEditableQuestionsLimit(data.maxQuestionsPerStudent || 1);
+          setEditableTopicQuestionsLimit(data.maxQuestionsPerTopicPerStudent || 1);
+          setEditableMaxTopicsLimit(data.maxTopicsPerStudent || 0);
+          setEditableThreshold(data.scoreThreshold || 75);
+          setEditableTopCount(data.topCount || 2);
+          setEditableSelectionMode(data.selectionMode || 'threshold_and_top_count');
+          return;
+        }
       }
+
+      // If server could not be reached or returned non-JSON, preserve local session if code matches
+      try {
+        const stored = localStorage.getItem('edu_last_session');
+        if (stored) {
+          const localData: SessionInfo = JSON.parse(stored);
+          if (localData && localData.code === codeToUse) {
+            setSession(localData);
+            setEditableCourseName(localData.courseName);
+            setEditableTopics(localData.topics || []);
+            setEditableAttemptsLimit(localData.maxAnswerAttemptsPerQuestion || 1);
+            setEditableQuestionsLimit(localData.maxQuestionsPerStudent || 1);
+            setEditableTopicQuestionsLimit(localData.maxQuestionsPerTopicPerStudent || 1);
+            setEditableMaxTopicsLimit(localData.maxTopicsPerStudent || 0);
+            setEditableThreshold(localData.scoreThreshold || 75);
+            setEditableTopCount(localData.topCount || 2);
+            setEditableSelectionMode(localData.selectionMode || 'threshold_and_top_count');
+            return;
+          }
+        }
+      } catch {}
+      setSession(null);
     } catch {
+      // Preserve local session if exists
+      try {
+        const stored = localStorage.getItem('edu_last_session');
+        if (stored) {
+          const localData: SessionInfo = JSON.parse(stored);
+          if (localData) {
+            setSession(localData);
+            return;
+          }
+        }
+      } catch {}
       setSession(null);
     } finally {
       setIsLoadingSession(false);
@@ -310,7 +393,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setIsSavingSettings(true);
     setSettingsSuccessMsg('');
     try {
-      const res = await fetch(`/api/sessions/${session.code}/settings`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -326,13 +409,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         }),
       });
 
+      const data = await safeJson<SessionInfo>(res);
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Ayarlar kaydedilemedi.');
+        throw new Error((data as any)?.error || 'Ayarlar kaydedilemedi.');
       }
 
-      const updated: SessionInfo = await res.json();
-      setSession(updated);
+      if (data) {
+        setSession(data);
+      }
       setSettingsSuccessMsg('Oturum ayarları (Eşik, Sınırlar, Ders & Konular) başarıyla güncellendi!');
       setTimeout(() => setSettingsSuccessMsg(''), 4000);
     } catch (err: unknown) {
@@ -360,7 +444,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     if (type === 'maxTopics') setEditableMaxTopicsLimit(clampedVal);
 
     try {
-      const res = await fetch(`/api/sessions/${session.code}/settings`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -376,8 +460,10 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         }),
       });
       if (res.ok) {
-        const updated: SessionInfo = await res.json();
-        setSession(updated);
+        const updated = await safeJson<SessionInfo>(res);
+        if (updated) {
+          setSession(updated);
+        }
         setSettingsSuccessMsg(
           type === 'attempts'
             ? `Cevap verme hakkı anında güncellendi: ${clampedVal} hak / soru (Öğrenci ekranlarına iletildi)`
@@ -421,13 +507,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       if (isPolling) return;
       isPolling = true;
       try {
-        const res = await fetch(`/api/sessions/${activeSessionCode}`);
+        const res = await apiFetch(`/api/sessions/${activeSessionCode}`);
         if (res.ok) {
-          const updated: SessionInfo = await res.json();
-          setSession(updated);
+          const updated = await safeJson<SessionInfo>(res);
+          if (updated) {
+            setSession(updated);
 
-          // If in quiz mode, calculate live stats for active question
-          if (updated.status === 'quiz_active') {
+            // If in quiz mode, calculate live stats for active question
+            if (updated.status === 'quiz_active') {
             const selectedQ = updated.questions.filter((q) => q.selectionStatus === 'Seçildi');
             const currentQ = selectedQ[updated.quizState.activeQuestionIndex];
             if (currentQ) {
@@ -475,11 +562,12 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             }
           }
         }
-      } catch (err) {
-        // silent polling catch
-      } finally {
-        isPolling = false;
       }
+    } catch (err) {
+      // silent polling catch
+    } finally {
+      isPolling = false;
+    }
     }, 3500);
 
     return () => clearInterval(interval);
@@ -652,7 +740,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     let currentSession = session;
     if (!currentSession) {
       try {
-        const autoRes = await fetch('/api/sessions', {
+        const autoRes = await apiFetch('/api/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -660,8 +748,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             topics: ['Genel Konu'],
           }),
         });
-        if (autoRes.ok) {
-          const createdSession: SessionInfo = await autoRes.json();
+        const createdSession = await safeJson<SessionInfo>(autoRes);
+        if (autoRes.ok && createdSession) {
           currentSession = createdSession;
           setSession(createdSession);
           onSessionCodeChange(createdSession.code);
@@ -684,22 +772,23 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       const { id, url } = await createQuizSpreadsheet(currentSession.courseName, currentSession.code, token);
       
       // Link sheet with server session
-      const linkRes = await fetch(`/api/sessions/${currentSession.code}/link-sheet`, {
+      const linkRes = await apiFetch(`/api/sessions/${currentSession.code}/link-sheet`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ spreadsheetId: id, spreadsheetUrl: url }),
       });
 
-      if (!linkRes.ok) {
-        throw new Error('E-tablo oluşturuldu fakat oturum ile ilişkilendirilemedi.');
-      }
-
-      const updated: SessionInfo = await linkRes.json();
-      setSession(updated);
-
-      // Sync existing questions if any
-      if (updated.questions && updated.questions.length > 0) {
-        await syncAllQuestionsWithUpdate(id, updated.questions, token);
+      const updated = await safeJson<SessionInfo>(linkRes);
+      if (linkRes.ok && updated) {
+        setSession(updated);
+        if (updated.questions && updated.questions.length > 0) {
+          await syncAllQuestionsWithUpdate(id, updated.questions, token);
+        }
+      } else {
+        setSession((prev) => (prev ? { ...prev, spreadsheetId: id, spreadsheetUrl: url } : prev));
+        if (currentSession.questions && currentSession.questions.length > 0) {
+          await syncAllQuestionsWithUpdate(id, currentSession.questions, token);
+        }
       }
 
       setSheetSyncSuccess('Google Sheet başarıyla oluşturuldu ve "Sorular" & "Cevaplar" sayfaları bağlandı!');
@@ -745,7 +834,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     let currentSession = session;
     if (!currentSession) {
       try {
-        const autoRes = await fetch('/api/sessions', {
+        const autoRes = await apiFetch('/api/sessions', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -753,8 +842,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
             topics: ['Genel Konu'],
           }),
         });
-        if (autoRes.ok) {
-          const createdSession: SessionInfo = await autoRes.json();
+        const createdSession = await safeJson<SessionInfo>(autoRes);
+        if (autoRes.ok && createdSession) {
           currentSession = createdSession;
           setSession(createdSession);
           onSessionCodeChange(createdSession.code);
@@ -777,7 +866,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       const sheet = await connectExistingSpreadsheet(input.trim(), token);
 
       // Save to backend session
-      const res = await fetch(`/api/sessions/${currentSession.code}/link-sheet`, {
+      const res = await apiFetch(`/api/sessions/${currentSession.code}/link-sheet`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -786,17 +875,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         }),
       });
 
-      if (!res.ok) {
-        throw new Error('Oturum Google Sheet ile ilişkilendirilemedi.');
-      }
-
-      const updated: SessionInfo = await res.json();
-      setSession(updated);
-      setIsExistingSheetModalOpen(false);
-
-      // If session already has questions, sync them into the existing sheet safely (preserving prior sessions)
-      if (updated.questions && updated.questions.length > 0) {
-        await syncAllQuestionsWithUpdate(sheet.id, updated.questions, token);
+      const updated = await safeJson<SessionInfo>(res);
+      if (res.ok && updated) {
+        setSession(updated);
+        setIsExistingSheetModalOpen(false);
+        if (updated.questions && updated.questions.length > 0) {
+          await syncAllQuestionsWithUpdate(sheet.id, updated.questions, token);
+        }
+      } else {
+        setSession((prev) => (prev ? { ...prev, spreadsheetId: sheet.id, spreadsheetUrl: sheet.url } : prev));
+        setIsExistingSheetModalOpen(false);
+        if (currentSession.questions && currentSession.questions.length > 0) {
+          await syncAllQuestionsWithUpdate(sheet.id, currentSession.questions, token);
+        }
       }
 
       setSheetSyncSuccess(
@@ -857,7 +948,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         .map((t) => t.trim())
         .filter((t) => t.length > 0);
 
-      const res = await fetch('/api/sessions', {
+      const res = await apiFetch('/api/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -873,14 +964,37 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         }),
       });
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Oturum oluşturulamadı.');
+      const created = await safeJson<SessionInfo & { error?: string }>(res);
+      if (res.ok && created && created.code) {
+        onSessionCodeChange(created.code);
+        setSession(created);
+      } else {
+        // Fallback for standalone/Netlify static deployment without live backend
+        const fallbackCode = Math.floor(10000 + Math.random() * 90000).toString();
+        const fallbackSession: SessionInfo = {
+          code: fallbackCode,
+          courseName: newCourseName.trim(),
+          topics: topics.length > 0 ? topics : ['Genel Konu'],
+          scoreThreshold: newThreshold,
+          topCount: newTopCount,
+          selectionMode: newSelectionMode,
+          maxAnswerAttemptsPerQuestion: newAttemptsLimit,
+          maxQuestionsPerStudent: newQuestionsLimit,
+          maxQuestionsPerTopicPerStudent: newTopicQuestionsLimit,
+          maxTopicsPerStudent: newMaxTopicsLimit,
+          status: 'collecting',
+          createdAt: new Date().toISOString(),
+          questions: [],
+          quizState: {
+            activeQuestionIndex: 0,
+            showAnswer: false,
+            isAcceptingAnswers: false,
+          },
+          answers: [],
+        };
+        onSessionCodeChange(fallbackCode);
+        setSession(fallbackSession);
       }
-
-      const created: SessionInfo = await res.json();
-      onSessionCodeChange(created.code);
-      setSession(created);
       setIsNewSessionModalOpen(false);
       setNewCourseName('');
       setNewTopicsInput('');
@@ -914,18 +1028,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         : 'Google Gemini soruları pedagojik kriterlerle inceliyor (doğruluk, çeldiriciler, netlik)...'
     );
     try {
-      const res = await fetch(`/api/sessions/${session.code}/analyze`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ additionalCriteria: effectiveCriteria }),
       });
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || 'Gemini analizi tamamlanamadı.');
+      const result = await safeJson<{ session?: SessionInfo; error?: string }>(res);
+      if (!res.ok || !result || !result.session) {
+        throw new Error(result?.error || `Gemini analizi tamamlanamadı (HTTP ${res.status}).`);
       }
 
-      const result = await res.json();
       setSession(result.session);
       // NOTE: Results are first reviewed on the teacher panel! We do NOT overwrite Google Sheet here.
     } catch (err: unknown) {
@@ -952,12 +1065,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         setIsFinalizingEvaluation(true);
         try {
           // 1. Mark finalized on server
-          const finRes = await fetch(`/api/sessions/${session.code}/finalize-evaluation`, {
+          const finRes = await apiFetch(`/api/sessions/${session.code}/finalize-evaluation`, {
             method: 'POST',
           });
-          if (finRes.ok) {
-            const data = await finRes.json();
-            setSession(data.session);
+          const finData = await safeJson<{ session?: SessionInfo }>(finRes);
+          if (finRes.ok && finData?.session) {
+            setSession(finData.session);
+          } else {
+            setSession((prev) => (prev ? { ...prev, isEvaluationFinalized: true } : prev));
           }
 
           // 2. Sync to Google Sheets if connected
@@ -984,13 +1099,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const handleUpdateThreshold = async (newVal: number) => {
     if (!session) return;
     try {
-      const res = await fetch(`/api/sessions/${session.code}/threshold`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/threshold`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ threshold: newVal }),
       });
-      if (res.ok) {
-        const updated = await res.json();
+      const updated = await safeJson<SessionInfo>(res);
+      if (res.ok && updated) {
         setSession(updated);
       }
     } catch (err) {
@@ -1004,13 +1119,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     const target = Math.max(1, Math.min(session.questions.length, count));
     setTopCountInput(target);
     try {
-      const res = await fetch(`/api/sessions/${session.code}/select-top`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/select-top`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ count: target }),
       });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeJson<{ session?: SessionInfo }>(res);
+      if (res.ok && data?.session) {
         setSession(data.session);
       }
     } catch (err) {
@@ -1032,7 +1147,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         selectionMode: 'threshold' as const,
       };
       const merged = { ...prev, ...partialConfig };
-      const res = await fetch(`/api/sessions/${session.code}/topics/config`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/topics/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1043,8 +1158,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           maxQuestionsLimit: merged.maxQuestionsLimit,
         }),
       });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeJson<{ session?: SessionInfo }>(res);
+      if (res.ok && data?.session) {
         setSession(data.session);
       }
     } catch (err) {
@@ -1073,13 +1188,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           selectionMode: mode,
         };
       }
-      const res = await fetch(`/api/sessions/${session.code}/topics/config`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/topics/config`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ topicConfigs: newConfigs }),
       });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeJson<{ session?: SessionInfo }>(res);
+      if (res.ok && data?.session) {
         setSession(data.session);
       }
     } catch (err) {
@@ -1096,13 +1211,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     if (!session) return;
     const nextStatus = currentStatus === 'Seçildi' ? 'Seçilmedi' : 'Seçildi';
     try {
-      const res = await fetch(`/api/sessions/${session.code}/override-selection`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/override-selection`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ questionId, status: nextStatus }),
       });
-      if (res.ok) {
-        const data = await res.json();
+      const data = await safeJson<{ session?: SessionInfo }>(res);
+      if (res.ok && data?.session) {
         setSession(data.session);
       }
     } catch (err) {
@@ -1120,11 +1235,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
 
     try {
-      const res = await fetch(`/api/sessions/${session.code}/quiz/start`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/quiz/start`, {
         method: 'POST',
       });
-      if (res.ok) {
-        const updated = await res.json();
+      const updated = await safeJson<SessionInfo>(res);
+      if (res.ok && updated) {
         setSession(updated);
       }
     } catch (err) {
@@ -1136,13 +1251,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   const handleQuizControl = async (action: string, index?: number) => {
     if (!session) return;
     try {
-      const res = await fetch(`/api/sessions/${session.code}/quiz/control`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/quiz/control`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, index }),
       });
-      if (res.ok) {
-        const updated = await res.json();
+      const updated = await safeJson<SessionInfo>(res);
+      if (res.ok && updated) {
         setSession(updated);
 
         // If quiz is finished, auto-sync answers to Google Sheet if connected
@@ -1171,14 +1286,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     if (!session) return;
     setIsGeneratingQuizReport(true);
     try {
-      const res = await fetch(`/api/sessions/${session.code}/generate-quiz-report`, {
+      const res = await apiFetch(`/api/sessions/${session.code}/generate-quiz-report`, {
         method: 'POST',
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Rapor oluşturulamadı.');
+      const data = await safeJson<{ session?: SessionInfo; error?: string }>(res);
+      if (!res.ok || !data) {
+        throw new Error(data?.error || `Rapor oluşturulamadı (HTTP ${res.status}).`);
       }
-      const data = await res.json();
       if (data.session) {
         setSession(data.session);
       }

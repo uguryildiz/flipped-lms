@@ -22,6 +22,7 @@ import {
   X,
 } from 'lucide-react';
 import { AikenQuestion, QuizAnswer, SessionInfo } from '../types';
+import { apiFetch, safeJson } from '../utils/api';
 
 interface StudentPortalProps {
   initialSessionCode?: string;
@@ -109,22 +110,55 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const fetchSession = async (codeToFetch = sessionCode) => {
     if (!codeToFetch || codeToFetch.length !== 5) return null;
     try {
-      const res = await fetch(`/api/sessions/${codeToFetch}`);
+      const res = await apiFetch(`/api/sessions/${codeToFetch}`);
+      if (res.ok) {
+        const data = await safeJson<SessionInfo>(res);
+        if (data) {
+          setSession(data);
+          if (data.topics && data.topics.length > 0) {
+            setSelectedTopic((prev) => (prev && data.topics.includes(prev) ? prev : data.topics[0]));
+          }
+          return data;
+        }
+      }
+
+      // Check localStorage if backend is offline or static Netlify deployment
+      try {
+        const stored = localStorage.getItem('edu_last_session');
+        if (stored) {
+          const localData: SessionInfo = JSON.parse(stored);
+          if (localData && localData.code === codeToFetch) {
+            setSession(localData);
+            if (localData.topics && localData.topics.length > 0) {
+              setSelectedTopic((prev) => (prev && localData.topics.includes(prev) ? prev : localData.topics[0]));
+            }
+            return localData;
+          }
+        }
+      } catch {}
+
       if (!res.ok) {
         if (res.status === 404) {
           setSession(null);
           return null;
         }
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Oturum bulunamadı.');
+        const data = await safeJson<{ error?: string }>(res);
+        throw new Error(data?.error || 'Oturum bulunamadı.');
       }
-      const data: SessionInfo = await res.json();
-      setSession(data);
-      if (data.topics && data.topics.length > 0) {
-        setSelectedTopic((prev) => (prev && data.topics.includes(prev) ? prev : data.topics[0]));
-      }
-      return data;
+      setSession(null);
+      return null;
     } catch (err: unknown) {
+      // Local fallback on network error
+      try {
+        const stored = localStorage.getItem('edu_last_session');
+        if (stored) {
+          const localData: SessionInfo = JSON.parse(stored);
+          if (localData && localData.code === codeToFetch) {
+            setSession(localData);
+            return localData;
+          }
+        }
+      } catch {}
       setSession(null);
       throw err;
     }
@@ -222,37 +256,39 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
       if (isPolling) return;
       isPolling = true;
       try {
-        const res = await fetch(`/api/sessions/${sessionCode}`);
+        const res = await apiFetch(`/api/sessions/${sessionCode}`);
         if (res.ok) {
-          const updated: SessionInfo = await res.json();
-          setSession(updated);
+          const updated = await safeJson<SessionInfo>(res);
+          if (updated) {
+            setSession(updated);
 
-          // Manage quiz question transition
-          if (updated.status === 'quiz_active') {
-            const activeIndex = updated.quizState.activeQuestionIndex;
-            // Only synchronize answer selection when the question actually changes
-            if (trackedQuestionIndexRef.current !== activeIndex) {
-              trackedQuestionIndexRef.current = activeIndex;
+            // Manage quiz question transition
+            if (updated.status === 'quiz_active') {
+              const activeIndex = updated.quizState.activeQuestionIndex;
+              // Only synchronize answer selection when the question actually changes
+              if (trackedQuestionIndexRef.current !== activeIndex) {
+                trackedQuestionIndexRef.current = activeIndex;
 
-              const selectedQuestions = updated.questions.filter((q) => q.selectionStatus === 'Seçildi');
-              const currentQ = selectedQuestions[activeIndex];
-              if (currentQ) {
-                const myAnswersForQ = updated.answers?.filter(
-                  (a) => a.questionId === currentQ.id && a.studentNo.trim() === studentNo.trim()
-                ) || [];
+                const selectedQuestions = updated.questions.filter((q) => q.selectionStatus === 'Seçildi');
+                const currentQ = selectedQuestions[activeIndex];
+                if (currentQ) {
+                  const myAnswersForQ = updated.answers?.filter(
+                    (a) => a.questionId === currentQ.id && a.studentNo.trim() === studentNo.trim()
+                  ) || [];
 
-                if (myAnswersForQ.length > 0) {
-                  setSelectedOption(myAnswersForQ[myAnswersForQ.length - 1].givenAnswer);
+                  if (myAnswersForQ.length > 0) {
+                    setSelectedOption(myAnswersForQ[myAnswersForQ.length - 1].givenAnswer);
+                  } else {
+                    setSelectedOption(null);
+                  }
                 } else {
                   setSelectedOption(null);
                 }
-              } else {
-                setSelectedOption(null);
+                setSubmitAnswerWarning('');
               }
-              setSubmitAnswerWarning('');
+            } else {
+              trackedQuestionIndexRef.current = null;
             }
-          } else {
-            trackedQuestionIndexRef.current = null;
           }
         } else if (res.status === 404) {
           setIsJoined(false);
@@ -387,7 +423,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
     setIsSubmittingQuestion(true);
     try {
-      const res = await fetch(`/api/sessions/${sessionCode}/questions`, {
+      const res = await apiFetch(`/api/sessions/${sessionCode}/questions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -404,9 +440,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await safeJson<{ error?: string }>(res);
       if (!res.ok) {
-        throw new Error(data.error || 'Soru yüklenemedi.');
+        throw new Error(data?.error || `Soru yüklenemedi (HTTP ${res.status}).`);
       }
 
       const nextRemaining = Math.max(0, maxQuestionsLimit - (questionsSubmittedCount + 1));
@@ -481,7 +517,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
 
     setIsSavingEdit(true);
     try {
-      const res = await fetch(`/api/sessions/${sessionCode}/questions/${editingQuestion.id}`, {
+      const res = await apiFetch(`/api/sessions/${sessionCode}/questions/${editingQuestion.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -497,9 +533,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await safeJson<{ error?: string }>(res);
       if (!res.ok) {
-        throw new Error(data.error || 'Soru güncellenemedi.');
+        throw new Error(data?.error || `Soru güncellenemedi (HTTP ${res.status}).`);
       }
 
       setEditingQuestion(null);
@@ -517,15 +553,15 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
   const handleDeleteQuestion = async (q: AikenQuestion) => {
     setIsDeletingQuestion(true);
     try {
-      const res = await fetch(`/api/sessions/${sessionCode}/questions/${q.id}`, {
+      const res = await apiFetch(`/api/sessions/${sessionCode}/questions/${q.id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ studentNo: studentNo.trim() }),
       });
 
-      const data = await res.json();
+      const data = await safeJson<{ error?: string }>(res);
       if (!res.ok) {
-        throw new Error(data.error || 'Soru silinemedi.');
+        throw new Error(data?.error || `Soru silinemedi (HTTP ${res.status}).`);
       }
 
       setDeletingQuestion(null);
@@ -622,7 +658,7 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
     setIsSubmittingAnswer(true);
     setSubmitAnswerWarning('');
     try {
-      const res = await fetch(`/api/sessions/${sessionCode}/quiz/answer`, {
+      const res = await apiFetch(`/api/sessions/${sessionCode}/quiz/answer`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -632,9 +668,9 @@ export const StudentPortal: React.FC<StudentPortalProps> = ({
         }),
       });
 
-      const data = await res.json();
+      const data = await safeJson<{ error?: string }>(res);
       if (!res.ok) {
-        throw new Error(data.error || 'Cevap gönderilemedi.');
+        throw new Error(data?.error || `Cevap gönderilemedi (HTTP ${res.status}).`);
       }
 
       await fetchSession();

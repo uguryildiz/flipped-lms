@@ -1,0 +1,11 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Single Page App (SPA) fallback routing
+# Note: For Netlify deployments, if you have a separate backend server (e.g. on Render, Railway, Fly.io),
+# you can configure VITE_API_URL in Netlify Environment Variables.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

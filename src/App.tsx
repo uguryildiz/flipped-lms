@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { TeacherDashboard } from './components/TeacherDashboard';
 import { StudentPortal } from './components/StudentPortal';
+import { apiFetch, safeJson } from './utils/api';
 
 export default function App() {
   const [activeTab, setActiveTabState] = useState<'teacher' | 'student'>(() => {
@@ -53,8 +54,8 @@ export default function App() {
   // On mount: if no local session code, check if there is an active session on the server
   useEffect(() => {
     if (!activeSessionCode) {
-      fetch('/api/sessions/latest')
-        .then((res) => (res.ok ? res.json() : null))
+      apiFetch('/api/sessions/latest')
+        .then((res) => (res.ok ? safeJson<{ code?: string }>(res) : null))
         .then((data) => {
           if (data?.code) {
             setActiveSessionCode(data.code);

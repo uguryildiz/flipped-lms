@@ -179,7 +179,7 @@ export async function ensureSheetTabsAndHeaders(spreadsheetId: string, token?: s
     throw new Error(errMsg || 'Google Sheet bilgisi alınamadı. Lütfen URL / ID bilgisini kontrol ediniz.');
   }
 
-  const meta = await metaRes.json();
+  const meta = await metaRes.json().catch(() => ({}));
   const sheets: { properties: { sheetId: number; title: string } }[] = meta.sheets || [];
   const hasQuestionsSheet = sheets.some((s) => s.properties?.title === QUESTIONS_SHEET_NAME);
   const hasAnswersSheet = sheets.some((s) => s.properties?.title === ANSWERS_SHEET_NAME);
@@ -232,7 +232,7 @@ export async function ensureSheetTabsAndHeaders(spreadsheetId: string, token?: s
   );
   let needQHeaders = true;
   if (qHeaderRes.ok) {
-    const qData = await qHeaderRes.json();
+    const qData = await qHeaderRes.json().catch(() => ({}));
     if (qData.values && qData.values.length > 0 && qData.values[0].length > 0) {
       needQHeaders = false;
     }
@@ -248,7 +248,7 @@ export async function ensureSheetTabsAndHeaders(spreadsheetId: string, token?: s
   );
   let needAHeaders = true;
   if (aHeaderRes.ok) {
-    const aData = await aHeaderRes.json();
+    const aData = await aHeaderRes.json().catch(() => ({}));
     if (aData.values && aData.values.length > 0 && aData.values[0].length > 0) {
       needAHeaders = false;
     }
@@ -285,7 +285,7 @@ export async function connectExistingSpreadsheet(
 
   let title = 'Bağlı Google Sheet';
   if (metaRes.ok) {
-    const meta = await metaRes.json();
+    const meta = await metaRes.json().catch(() => ({}));
     title = meta.properties?.title || title;
   }
 
@@ -309,7 +309,7 @@ export async function listUserSpreadsheets(token?: string): Promise<Array<{ id: 
     if (!res.ok) {
       return [];
     }
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     return data.files || [];
   } catch {
     return [];
@@ -365,8 +365,11 @@ export async function createQuizSpreadsheet(
     throw new Error(errorData.error?.message || 'Google Sheet oluşturulamadı.');
   }
 
-  const sheetData = await createRes.json();
+  const sheetData = await createRes.json().catch(() => ({}));
   const spreadsheetId = sheetData.spreadsheetId;
+  if (!spreadsheetId) {
+    throw new Error('Google Sheet oluşturuldu fakat kimlik (ID) bilgisi alınamadı.');
+  }
   const spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
 
   // Write headers cleanly to both sheets via update (PUT)
@@ -429,7 +432,7 @@ export async function syncAllQuestionsWithUpdate(
 
   let existingValues: (string | number)[][] = [];
   if (getRes.ok) {
-    const data = await getRes.json();
+    const data = await getRes.json().catch(() => ({}));
     existingValues = data.values || [];
   }
 
@@ -542,7 +545,7 @@ export async function syncAnswersBatchToSheet(
 
   const existingSignatures = new Set<string>();
   if (existingRes.ok) {
-    const data = await existingRes.json();
+    const data = await existingRes.json().catch(() => ({}));
     const rows: (string | number)[][] = data.values || [];
     for (const r of rows) {
       if (r && r.length >= 7) {
